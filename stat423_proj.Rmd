@@ -5,6 +5,12 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
+```{r setup}
+# setwd("/Users/typhoeus/Documents/Courses/STAT 423/Project/")
+library(corrplot)
+library(car)  
+```
+
 
 ```{r data cleaning}
 data <- read.csv("dataset_phishing.csv")
@@ -15,15 +21,9 @@ data$status <- as.numeric(data$status == "phishing")
 
 phishing -> 1
 legitimate -> 0
-```{r library}
-library(corrplot)
-library(car)  
-```
-
-
 ```{r data checking}
-#which(is.na(data)) # check missing value
-
+# which(is.na(data)) # check missing value
+# 
 all_zeros <- apply(data, 2, function(x) all(x == 0))
 cat("Column names with all 0s:", colnames(data)[which(all_zeros)], "\n")
 cat("Columns with all 0s:", which(all_zeros), "\n")
@@ -37,15 +37,19 @@ datac[, columns_to_factor] <- lapply(datac[, columns_to_factor], factor)
 str(datac)
 ```
 
-
-
 ```{r model_fit}
 fit1 <- glm(status ~., data = datac, family = binomial)
 summary(fit1)
 ```
+
 ```{r, check_model}
 vif_values <- vif(fit1)
 columns_to_remove <- names(vif_values)[vif_values > 10]
 data_cleaned <- data[, !names(data) %in% columns_to_remove]
+```
+
+
+```{r}
+
 ```
 
