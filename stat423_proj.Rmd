@@ -12,6 +12,7 @@ library(car)
 library(ggplot2)
 library(vcd)
 library(gridExtra)
+library(dplyr)
 ```
 
 
@@ -24,34 +25,62 @@ data$status <- as.factor(data$status)
 
 which(is.na(data)) # check missing value
 
-# check whether all value in the column has different value
-all_zeros <- apply(data, 2, function(x) all(x == 0))
-cat("Column names with all 0s:", colnames(data)[which(all_zeros)], "\n")
-cat("Columns with all 0s:", which(all_zeros), "\n")
-data <- data[, !all_zeros]
-
 # let categorical date become factor
 columns_to_factor <- c("ip", "https_token", "punycode", "port", "tld_in_path", "tld_in_subdomain", "abnormal_subdomain", "prefix_suffix", "random_domain", "shortening_service", "path_extension", "domain_in_brand", "brand_in_subdomain", "brand_in_path", "suspecious_tld", "statistical_report", "whois_registered_domain", "dns_record", "google_index")
 data[, columns_to_factor] <- lapply(data[, columns_to_factor], factor)
 ```
 
+```{r clean negative row}
+# seperate continuous predictors and categorical predictors
+con_data <- data[, !sapply(data, is.factor)]
+factor_data <- data[, sapply(data, is.factor)]
+
+# get the index of the observation that have negative value in any column, and remove the observation
+negative_index <- which(apply(con_data, 1, function(row) any(row < 0)))
+data <- data[-negative_index, ]
+```
+
+```{r remove factor}
+# count categorical predictors
+lapply(factor_data, table)
+
+good_factor <- c("ip", "https_token", "prefix_suffix", "google_index", "status")
+bad_factor <- setdiff(names(factor_data), good_factor)
+
+# select evenly distributed categorical predictors
+data <- select(data, -all_of(bad_factor))
+```
+
+``` {r check all zero}
+# check whether all value in the column has different value
+all_zeros <- apply(data, 2, function(x) all(x == 0))
+cat("Column names with all 0s:", colnames(data)[which(all_zeros)], "\n")
+cat("Columns with all 0s:", which(all_zeros), "\n")
+data <- data[, !all_zeros]
+```
+
+
 ```{r multicollinearity}
 fit1 <- glm(status ~., data = data, family = binomial)
 
 # check multicollinearity
-vif_values <- vif(fit1)[, 1]
+vif_values <- vif(fit1)
 columns_to_remove <- names(vif_values)[vif_values > 10]
 datac <- data[, !names(data) %in% columns_to_remove]
 #vif_values[vif_values < 5]
+```
 
+``` {r combine special character}
 # combine all special character
-special_char = rowSums(datac[, c(3:12)])
+special_char = rowSums(datac[, c(3:16)])
 colnames(datac)[3] = "special_char"
 datac[,3] = special_char
-datac <- datac[,-c(4:12)]
+datac <- datac[,-c(4:16)]
 
+# Cook's distance -> check outliers
 plot(fit1, which = 4)
 ```
+
 
 ```{r splitdata}
 set.seed(123)
@@ -63,20 +92,19 @@ test.data <- datac[test,]
 ```
 
 ```{r}
-# all categorical variabbles in our dataset
-colnames(datac)[which(sapply(datac, is.factor))]
+# all categorical variables in our dataset
+cate_var <- colnames(datac)[which(sapply(datac, is.factor))]
 factor_data <- datac[, sapply(datac, is.factor)]
 con_data <- datac[, !sapply(datac, is.factor)]
 ```
 
 ```{r, correlation plot}
 train_all_num <- train.data
-for (col_name in columns_to_factor) {
+for (col_name in cate_var) {
   train_all_num[[col_name]] <- as.numeric(as.character(train_all_num[[col_name]]))
 }
 
-corrplot(cor(train_all_num[, -ncol(train_all_num)]), method = 'square', diag = FALSE, order = 'hclust',
-         addrect = 3, rect.col = 'blue', rect.lwd = 3, tl.col = "black", tl.cex = 0.5)
+corrplot(cor(train_all_num[, -ncol(train_all_num)]), method = 'square', diag = FALSE, order = 'hclust', addrect = 3, rect.col = 'blue', rect.lwd = 3, tl.col = "black", tl.cex = 0.6, tl.srt = 45)
 ```
 
 TODO: histogram, boxplot
@@ -135,24 +163,28 @@ ggplot(train.data, aes(x = factor(ip), fill = factor(status))) +
 #length(boxplot.stats(df$Grad.Rate[df$Private == 1])$out)
 #length(boxplot.stats(df$Grad.Rate[df$Private == 0])$out)
 ```
-```{r}
-plot1 <- grid.grabExpr(mosaic(~ ip + status, data = train.data))
 
+
+```{r mosaic}
+plot1 <- grid.grabExpr(mosaic(~ ip + status, data = train.data))
 
 plot2 <- grid.grabExpr(mosaic(~ https_token + status, data = train.data))
 
-plot3 <- grid.grabExpr(mosaic(~ tld_in_path + status, data = train.data))
+plot3 <- grid.grabExpr(mosaic(~ prefix_suffix + status, data = train.data))
 
-plot4 <- grid.grabExpr(mosaic(~ whois_registered_domain + status, data = train.data))
+plot4 <- grid.grabExpr(mosaic(~ google_index + status, data = train.data))
 
 grid.arrange(plot1, plot2,plot3,plot4)
 ```
 
-```{r}
-plot5 <- mosaic(~ punycode + status, data = train.data, 
-       labeling_args = list(set_labels = list(status = c("Legitimate", "Phishing"))))
 
-plot6 <- mosaic(~ port + status, data = train.data, 
-       labeling_args = list(set_labels = list(status = c("Legitimate", "Phishing"))))
+```{r description Statistics}
+summary_stats <- data.frame(
+  Minimum = apply(con_data, 2, function(x) round(min(x, na.rm = TRUE), 5)),
+  Maximum = format(apply(con_data, 2, function(x) round(max(x, na.rm = TRUE), 2)),  scientific = FALSE),
+  Median = apply(con_data, 2, function(x) round(median(x, na.rm = TRUE), 5)),
+  Mean = apply(con_data, 2, function(x) round(mean(x, na.rm = TRUE), 5))
+)
 ```
+
 
