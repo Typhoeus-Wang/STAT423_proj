@@ -1,0 +1,196 @@
+---
+title: "stat423_proj_test"
+author: "Yujia Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup}
+# setwd("/Users/typhoeus/Documents/Courses/STAT 423/Project/")
+library(corrplot)
+library(car)  
+library(ggplot2)
+library(vcd)
+library(gridExtra)
+library(dplyr)
+```
+
+
+```{r data cleaning}
+data <- read.csv("dataset_phishing.csv")
+data <- data[, -1]
+data <- data[, c(1:56, 81:ncol(data))] # remove content based features
+data$status <- as.numeric(data$status == "phishing") #phishing -> 1, legitimate -> 0
+data$status <- as.factor(data$status)
+
+which(is.na(data)) # check missing value
+
+# let categorical date become factor
+columns_to_factor <- c("ip", "https_token", "punycode", "port", "tld_in_path", "tld_in_subdomain", "abnormal_subdomain", "prefix_suffix", "random_domain", "shortening_service", "path_extension", "domain_in_brand", "brand_in_subdomain", "brand_in_path", "suspecious_tld", "statistical_report", "whois_registered_domain", "dns_record", "google_index")
+data[, columns_to_factor] <- lapply(data[, columns_to_factor], factor)
+```
+
+```{r clean negative row}
+# seperate continuous predictors and categorical predictors
+con_data <- data[, !sapply(data, is.factor)]
+factor_data <- data[, sapply(data, is.factor)]
+
+# get the index of the observation that have negative value in any column, and remove the observation
+negative_index <- which(apply(con_data, 1, function(row) any(row < 0)))
+data <- data[-negative_index, ]
+```
+
+```{r remove factor}
+# count categorical predictors
+factor_data <- data[, sapply(data, is.factor)]
+lapply(factor_data, table)
+
+good_factor <- c("ip", "https_token", "prefix_suffix", "google_index", "status")
+bad_factor <- setdiff(names(factor_data), good_factor)
+```
+
+
+``` {r}
+# select evenly distributed categorical predictors
+data <- select(data, -all_of(bad_factor))
+
+con_data <- data[, !sapply(data, is.factor)]
+```
+
+``` {r check all zero}
+summary_stats <- data.frame(
+  Minimum = apply(con_data, 2, function(x) round(min(x, na.rm = TRUE), 5)),
+  Maximum = format(apply(con_data, 2, function(x) round(max(x, na.rm = TRUE), 2)),  scientific = FALSE),
+  Median = apply(con_data, 2, function(x) round(median(x, na.rm = TRUE), 5)),
+  Mean = apply(con_data, 2, function(x) round(mean(x, na.rm = TRUE), 5))
+)
+
+# check whether all value in the column has different value
+all_zeros <- apply(data, 2, function(x) all(x == 0))
+cat("Column names with all 0s:", colnames(data)[which(all_zeros)], "\n")
+cat("Columns with all 0s:", which(all_zeros), "\n")
+data <- data[, !all_zeros]
+```
+
+
+```{r multicollinearity}
+fit1 <- glm(status ~., data = data, family = binomial)
+
+# check multicollinearity
+vif_values <- vif(fit1)
+columns_to_remove <- names(vif_values)[vif_values > 10]
+datac <- data[, !names(data) %in% columns_to_remove]
+#vif_values[vif_values < 5]
+```
+
+``` {r combine special character}
+# combine all special character
+special_char = rowSums(datac[, c(3:16)])
+colnames(datac)[3] = "special_char"
+datac[,3] = special_char
+datac <- datac[,-c(4:16)]
+
+# Cook's distance -> check outliers
+#plot(fit1, which = 4)
+```
+
+
+```{r splitdata}
+set.seed(123)
+train <- sample(c(TRUE,FALSE), nrow(datac), rep = TRUE, prob = c(0.9,0.1))
+test <- (!train)
+
+train.data <- datac[train, ]
+test.data <- datac[test,]
+```
+
+
+```{r}
+# all categorical variables in our dataset
+cate_var <- colnames(datac)[which(sapply(datac, is.factor))]
+factor_data <- datac[, sapply(datac, is.factor)]
+con_data <- datac[, !sapply(datac, is.factor)]
+```
+
+
+```{r description Statistics}
+summary_stats <- data.frame(
+  Minimum = apply(con_data, 2, function(x) round(min(x, na.rm = TRUE), 5)),
+  Maximum = format(apply(con_data, 2, function(x) round(max(x, na.rm = TRUE), 2)),  scientific = FALSE),
+  Median = apply(con_data, 2, function(x) round(median(x, na.rm = TRUE), 5)),
+  Mean = apply(con_data, 2, function(x) round(mean(x, na.rm = TRUE), 5))
+)
+```
+
+```{r, correlation plot}
+train_all_num <- train.data
+for (col_name in cate_var) {
+  train_all_num[[col_name]] <- as.numeric(as.character(train_all_num[[col_name]]))
+}
+
+corrplot(cor(train_all_num[, -ncol(train_all_num)]), method = 'square', diag = FALSE, order = 'hclust', addrect = 3, rect.col = 'blue', rect.lwd = 3, tl.col = "black", tl.cex = 0.6, tl.srt = 45)
+```
+
+TODO: histogram, boxplot
+
+
+```{r, plot}
+col_name <- "length_hostname"
+# ggplot(train.data, aes_string(x = col_name)) +
+#     geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+#     labs(title = paste("Histogram of", col_name), x = col_name, y = "Frequency") +
+#     theme_minimal() +
+#     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+par(mfrow = c(2, 3))
+
+hist(train.data$length_hostname, breaks = 100, freq = FALSE, 
+     xlab = "Number of length_hostname", 
+     main = "Histogram of hostname length",
+     xlim = c(0,max(train.data$length_hostname)), col = 'skyblue')
+curve(dnorm(x, mean = mean(train.data$length_hostname), sd = sd(train.data$length_hostname)), add = TRUE, col = "blue", lwd = 1, lty = 2)
+
+hist(train.data$domain_age, breaks = 100, freq = FALSE, 
+     xlab = "Number of domain_age", ylab = "Density", 
+     main = "Histogram of domain age",
+     xlim = c(0,max(train.data$domain_age)), col = 'skyblue')
+curve(dnorm(x, mean = mean(train.data$domain_age), sd = sd(train.data$domain_age)), add = TRUE, col = "blue", lwd = 1, lty = 2)
+
+hist(train.data$web_traffic, breaks = 100, freq = FALSE,
+     main = "Histogram of web traffic",
+     xlab = "Number of web_traffic", ylab = "Density", 
+     xlim = c(0,max(train.data$web_traffic)), col = 'skyblue')
+
+hist(train.data$domain_registration_length, breaks = 100, freq = FALSE, 
+     xlab = "Number of domain_registration_length", ylab = "Density", 
+     main = "Histogram of domain registration length",
+     xlim = c(0,max(train.data$domain_registration_length)), col = 'skyblue')
+
+hist(log(train.data$web_traffic), breaks = 100, freq = FALSE,
+     main = "Histogram of log(web traffic)",
+     xlab = "log(web_traffic)", ylab = "Density", 
+     xlim = c(0,max(log(train.data$web_traffic))), col = 'skyblue')
+
+
+hist(log(train.data$domain_registration_length), breaks = 100, freq = FALSE, 
+     xlab = "log(domain_registration_length)", ylab = "Density", 
+     main = "log(domain_registration_length)",
+     xlim = c(0,max(log(train.data$domain_registration_length))), col = 'skyblue')
+```
+
+
+```{r mosaic}
+plot1 <- grid.grabExpr(mosaic(~ ip + status, data = train.data))
+
+plot2 <- grid.grabExpr(mosaic(~ https_token + status, data = train.data))
+
+plot3 <- grid.grabExpr(mosaic(~ prefix_suffix + status, data = train.data))
+
+plot4 <- grid.grabExpr(mosaic(~ google_index + status, data = train.data))
+
+grid.arrange(plot1, plot2,plot3,plot4)
+```
+
+
+
+
+
