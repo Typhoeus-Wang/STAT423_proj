@@ -25,10 +25,10 @@ author: Qirui Wang, Yujia Dai
 		* Goodness of fit
 			* Residual plots
 			* QQ plot needed? (Office hour)
-	- Model Evaluation
-		* Run on test dataset
-		* ROC curve
-		* Put result to table
+- Model Evaluation
+	* Run on test dataset
+	* ROC curve
+	* Put result to table
 - Conclusion 
 	* Use result to answer research questions
 	* Potential action items for URL phishing problem
