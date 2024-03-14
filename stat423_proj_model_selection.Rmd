@@ -1,0 +1,123 @@
+---
+title: "stat423_proj_test"
+author: "Yujia Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup}
+# setwd("/Users/typhoeus/Documents/Courses/STAT 423/Project/")
+library(corrplot)
+library(car)  
+library(ggplot2)
+library(vcd)
+library(gridExtra)
+library(MASS)
+library(leaps)
+
+```
+
+
+
+```{r, data}
+
+train_data <- read.csv("train_data.csv")
+test_data <- read.csv("test_data.csv")
+
+train_data = subset(train_data, select = -X)
+test_data = subset(test_data, select = -X)
+
+
+columns_to_factor <- c("ip", "https_token", "prefix_suffix", "google_index", "status")
+
+train_data[, columns_to_factor] <- lapply(train_data[, columns_to_factor], factor)
+
+test_data[, columns_to_factor] <- lapply(test_data[, columns_to_factor], factor)
+
+str(train_data)
+```
+
+
+```{r, model_selection}
+# full model
+fit_full = glm(status~., data=train_data, family=binomial)
+
+# empty model
+fit_empty = glm(status~1, data=train_data, family=binomial)
+```
+
+```{r, AIC_selection}
+step(fit_full, dir="backward")
+
+step(fit_empty, dir="forward", scope=list(upper=fit_full,lowwer=fit_empty))
+```
+
+```{r, AIC_result}
+
+model_best_AIC = glm(formula = status ~ google_index + page_rank + nb_www + phish_hints + 
+    web_traffic + ratio_digits_host + ip + domain_age + nb_dslash + 
+    nb_redirection + length_hostname + https_token + special_char + 
+    nb_subdomains + http_in_path + ratio_digits_url + nb_com + 
+    domain_registration_length, family = binomial, data = train_data)
+
+summary(model_best_AIC)
+```
+
+```{r CP_selection}
+p = ncol(train_data) - 1
+
+# cat("The leave-one out cross validation for best model selected by AIC is: ", loocv.lm(model_best_backward))
+CP_fit_bwd <- regsubsets(status ~ ., data = train_data, nvmax = p, method = "backward")
+
+CP_fit_fwd <- regsubsets(status ~ ., data = train_data, nvmax = p, method = "forward")
+
+cat("model selected by Mallows’s CP farward has cp: ", min(summary(CP_fit_fwd)$cp), "\n")
+cat("model selected by Mallows’s CP backward has cp: ", min(summary(CP_fit_bwd)$cp), "\n")
+
+model_best_forward_CP <- which.min(summary(CP_fit_fwd)$cp)
+cp_predictors_forward <- names(which(summary(CP_fit_fwd)$which[model_best_forward_CP, ] == TRUE))
+cat("Predictors selected by Mallows’s CP forward:", paste(cp_predictors_forward, collapse = ", "), "\n")
+
+# Find the predictors selected by BIC
+model_best_backward_CP <- which.min(summary(CP_fit_bwd)$cp)
+cp_predictors_backward <- names(which(summary(CP_fit_bwd)$which[model_best_backward_CP, ] == TRUE))
+cat("Predictors selected by Mallows’s CP backward:", paste(cp_predictors_backward, collapse = ", "), "\n")
+
+model_best_CP = glm(status~length_hostname+ip+special_char+nb_www+nb_com+nb_dslash+http_in_path+https_token+ratio_digits_url+ratio_digits_host+nb_subdomains+nb_redirection+char_repeat+phish_hints+domain_registration_length+domain_age+web_traffic+google_index+page_rank, data=train_data, family=binomial)
+
+summary(model_best_CP)
+```
+
+```{r, comparing_models}
+anova(model_best_AIC, model_best_CP, test="Chisq")
+```
+This means 
+
+```{r, residuals}
+par(mfrow = c(2, 2))
+plot(model_best_AIC, cex = 0.5)
+```
+
+
+```{r, confidence interval}
+conf_intervals = confint(model_best_AIC)
+print(conf_intervals)
+```
+
+
+
+```{r, test_inference}
+predictions = predict(model_best_AIC, newdata = test_data, type = "response")
+binary_predictions = ifelse(predictions >= 0.5, 1, 0)
+accuracy <- sum(binary_predictions == test_data$status) / nrow(test_data)
+accuracy
+# binary_predictions
+sum(binary_predictions == test_data$status)
+# length(test.data)
+
+conf_matrix = table(test_data$status, binary_predictions)
+print("this is the confusion ")
+conf_matrix
+```
+
+
